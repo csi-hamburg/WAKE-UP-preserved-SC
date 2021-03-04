@@ -1,0 +1,86 @@
+---
+title: "Effect of rtPA on ChaCo score in WAKE-UP cohort"
+author: "Eckhard Schlemm"
+date: "2/26/2021"
+output: html_document
+---
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+asz <- 86
+# source('./scripts/prepdata.r')
+source('./scripts/loaddata.r')
+
+source('./scripts/environment.r')
+```
+
+# Patient characteristics
+```{r}
+dd %>% filter(ROI=='Precentral' & visit=='V0') %>% 
+  group_by(lesion_side) %>%  
+  summarise(n=n())
+```
+```{r}
+dd %>% filter(ROI=='Precentral' & visit=='V0') %>% 
+  group_by(treatment) %>%  
+  summarise(n=n())
+```
+```{r}
+dd %>% dplyr::select(ID, treatment, age, NIHSS) %>% distinct() %>% group_by(treatment) %>% 
+  summarise(age.mean = mean(age)
+            , age.sd = sd(age)
+            , NIHSS.median=median(NIHSS)
+            , NIHSS.lower = quantile(NIHSS, .25)
+            , NIHSS.upper = quantile(NIHSS, .75)
+            )
+```
+
+# Treatment effects and clinical outcome
+```{r}
+dd %>% dplyr::select(ID,treatment, goodOutcome) %>% distinct() %>% group_by(treatment, goodOutcome) %>% summarise(n=n())
+glm(goodOutcome ~ treatment + age + log(vol0) + NIHSS
+    , data = dd %>% dplyr::select(ID, goodOutcome, treatment, NIHSS, age, vol0) %>% distinct()
+    , family = 'binomial') %>% 
+  tidy(conf.int = TRUE, exponentiate = TRUE)
+```
+# Stroke lesion volumes
+```{r}
+d.vol <- dd %>% 
+  dplyr::select(ID, lesionvolume, visit, treatment, vol0) %>% 
+  distinct()
+wilcox.test(d.vol %>% filter(visit=='V0') %>% pull('lesionvolume')
+            , d.vol %>% filter(visit=='V3') %>% pull('lesionvolume')
+            , paired = TRUE)
+d.vol %>% group_by(treatment, visit) %>% 
+  summarise(Q = quantile(lesionvolume, probs = c(.25, .5, .75)), q = c(.25, .5, .75))
+```
+
+```{r}
+d.vol %>% 
+  group_by(visit) %>% nest() %>% 
+  mutate(wct = map(data, ~wilcox.test(lesionvolume ~ treatment, data = ., paired = FALSE))) %>% 
+  pull(wct, name = visit)
+```
+
+```{r}
+temp <- d.vol %>% group_by(ID) %>% 
+  mutate(delta.vol = lesionvolume[visit == 'V3'] - lesionvolume) %>% 
+  dplyr::filter(visit == 'V0')  
+
+temp %>% group_by(treatment) %>% 
+  summarise(Q = quantile(delta.vol, probs = c(.25, .5, .75)), q = c(.25, .5, .75))
+
+
+wilcox.test(delta.vol ~ treatment, data = temp)
+
+```
+```{r}
+dd %>% 
+  dplyr::select(ID, goodOutcome, treatment, NIHSS, age, vol0, lesionvolume, visit) %>% distinct() %>% 
+  group_by(ID) %>% 
+  mutate(delta.vol = log2(lesionvolume[visit == 'V3']/lesionvolume)) %>% 
+  dplyr::filter(visit == 'V0') %$% 
+  glm(goodOutcome ~ delta.vol + treatment + age + log(vol0) + NIHSS
+    , data = .
+    , family = 'binomial') %>% 
+  tidy(conf.int = TRUE, exponentiate = TRUE)
+```

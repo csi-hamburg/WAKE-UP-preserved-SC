@@ -1,0 +1,27 @@
+/clinical/
+/derivatives/figures/lesion_overlay/*
+/derivatives/surface_maps/*
+/derivatives/subjects*
+/derivatives/NeMo_output/
+lesionmasks/derivatives/*
+/lesionmasks/original/*
+*.log
+.sh*
+.sw*
+*.swp
+.xdebug*
+*.m~
+*.db
+*.db:encryptable
+*.Rproj.user
+*.Rhistory
+.RData
+*.Rproj
+*.RData
+*.md
+.authors
+makefile
+[0-9]+.o[0-9]+
+[0-9]+.e[0-9]+
+/code/Statistics R/*_cache/*
+/code/Statistics R/*_files/*

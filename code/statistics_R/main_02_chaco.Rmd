@@ -1,0 +1,64 @@
+---
+title: "Effect of rtPA on ChaCo score in WAKE-UP cohort"
+author: "Eckhard Schlemm"
+date: "2/26/2021"
+output: html_document
+---
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+asz <- 116
+#source('./scripts/prepdata.r')
+
+source('./scripts/loaddata.r')
+source('./scripts/environment.r')
+```
+
+
+```{r}
+dd %>% group_by(ROI, visit) %>% 
+  summarise(n=mean(nemoscore > 0)) %>% 
+  spread(visit, n) %>% 
+  arrange(-V0) %>%  
+  print(n=Inf)
+
+d.prop <- dd %>%
+  group_by(ROI, visit) %>%
+  filter(nemoscore > 0) %>%
+  summarise(Q = quantile(nemoscore, probs = c(.25, .5, .75)), q = c(.25, .5, .75)) %>%
+  arrange(visit) %>%
+  print(n=Inf)
+
+```
+```{r}
+source('./scripts/createctab.R')
+source('./scripts/massunivariatetable.r')
+```
+```{r}
+m <- dd %>%
+    filter(nemoscore > 0) %>%
+    lme4::lmer(formula = log(nemoscore) ~ visit*treatment + visit*ROI + llv*ROI  + (1|ID)
+            , data = .)
+tab.anova.fcn(m)
+```
+```{r}
+m.simple <- lme4::lmer(formula = log(nemoscore) ~ visit*treatment + (1|ID)
+                       , data = dd %>% filter(nemoscore > 0))
+m.sim <- arm::sim(m.simple, n.sims = 1e4)
+
+
+V0.Placebo <- m.sim@fixef[, '(Intercept)']
+V3.Placebo <- V0.Placebo + m.sim@fixef[, 'visitV3']
+V0.Alteplase <- V0.Placebo + m.sim@fixef[, 'treatmentrtPA']
+V3.Alteplase <- V3.Placebo + m.sim@fixef[, 'treatmentrtPA'] + m.sim@fixef[, 'visitV3:treatmentrtPA']
+
+exp(V3.Placebo - V0.Placebo) %>% quantile(x = ., probs = c(.025, .5, .975))
+exp(V3.Alteplase - V0.Alteplase) %>% quantile(x = ., probs = c(.025, .5, .975))
+
+```
+
+
+```{r  fig.width=8.5, fig.height=8.5}
+source('./scripts/createeffectplot.r')
+p
+```
+

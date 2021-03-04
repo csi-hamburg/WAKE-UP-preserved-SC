@@ -1,0 +1,110 @@
+---
+title: "Effect of rtPA on ChaCo score in WAKE-UP cohort"
+author: "Eckhard Schlemm"
+date: "2/26/2021"
+output: html_document
+
+---
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+asz <- 86
+#source('./scripts/prepdata.r')
+
+source('./scripts/loaddata.r')
+source('./scripts/environment.r')
+```
+
+```{r}
+d.vol <- dd %>% 
+  dplyr::select(ID, lesionvolume, visit, treatment, vol0) %>% 
+  distinct()
+nrow(d.vol)
+```
+
+```{r echo=FALSE, fig.height=8.5, fig.width=8.5}
+breaks <- 10^(-10:10)
+minor_breaks <- rep(1:9, 21)*(10^rep(-10:10, each=9))
+p <- d.vol %>% 
+  ggplot(aes(x=treatment, fill=visit, y=lesionvolume), color='white') + 
+  geom_boxplot(outlier.shape = 21, outlier.fill = NA, outlier.size = .75, outlier.stroke = .2)+
+  scale_y_continuous('Lesion volume [ml]'
+                     , breaks = breaks, minor_breaks = minor_breaks, trans = 'log10') +
+  scale_x_discrete(name = '', labels = c('Placebo', 'Alteplase')) +
+  scale_fill_npg(labels = c('Before','24 -- 36 hours after')) +
+  guides(fill = F) +
+  theme_minimal() +
+  theme(text=element_text(family="Helvetica")
+        , axis.line.y = element_line()
+        , axis.ticks.y.left = element_line())
+p
+ggsave('./../../derivatives/figures/supplement/lesionvolume.eps', plot = p, device = 'eps', width = 8.5, height = 8.5, units = 'cm')
+ggsave('./../../derivatives/figures/supplement/lesionvolume.svg', plot = p, device = 'svg', width = 8.5, height = 8.5, units = 'cm')
+```
+
+
+```{r warning=FALSE}
+res.glmmTMB <- tibble(fam = list(genpois(), nbinom1()))
+
+df.glmmTMB <- res.glmmTMB %>% 
+  mutate(mdl = map(fam, ~tryCatch(glmmTMB(lesionvolume ~ visit*treatment + (1|ID)
+                                          , dispformula = ~ 1
+                                          , data = d.vol 
+                                          , family = .
+                                          , control = glmmTMBControl())
+          , error = function(e)e, finally = NA)
+                     )
+         ) %>% 
+  mutate(fam.str = map(fam, ~.[[1]][[1]]) %>% as.character()) %>% 
+  mutate(c = map_chr(mdl,~class(.)[[1]])) %>% 
+  filter(c == 'glmmTMB') %>% 
+  mutate(AIC = map_dbl(mdl,~summary(.)$AICtab[[1]])
+         , GD = map_dbl(mdl,~summary(.)$AICtab[[4]])
+         , p.visit = map_dbl(mdl, ~summary(.)$coefficients$cond['visitV3','Pr(>|z|)'])
+         , p.treatment = map_dbl(mdl, ~summary(.)$coefficients$cond['treatmentrtPA','Pr(>|z|)'])
+         , p.ix = map_dbl(mdl, ~summary(.)$coefficients$cond['visitV3:treatmentrtPA','Pr(>|z|)'])
+        ) %>% 
+  arrange(AIC)
+```
+
+
+```{r echo=6, warning=FALSE, message=FALSE}
+t00 <- df.glmmTMB %>% 
+  mutate(tidy = map(mdl,tidy)) %>% 
+  unnest(tidy) %>% 
+  filter(effect=='fixed') %>% 
+  dplyr::select(fam.str, term, estimate, std.error, p.value) %>% 
+  gather(name, stats, estimate, std.error, p.value) %>% 
+  unite(temp, fam.str, name) %>% 
+  spread(temp, stats) %>% 
+  dplyr::select(term, genpois_estimate, genpois_std.error, genpois_p.value, nbinom1_estimate, nbinom1_std.error, nbinom1_p.value) %>% 
+  mutate(Model='lesionvolume ~ visit*treatment + (1|ID)')
+t1 <- glmmTMB(lesionvolume ~ treatment + log(vol0), data = d.vol %>% filter(visit=='V3'), family = nbinom1()) %>% tidy() %>% 
+  dplyr::select(-effect, -component, -statistic) %>% 
+  mutate(fam.str = 'nbinom1')
+t2 <- glmmTMB(lesionvolume ~ treatment + log(vol0), data = d.vol %>% filter(visit=='V3'), family = genpois()) %>% tidy() %>% 
+  dplyr::select(-effect, -component, -statistic) %>% 
+  mutate(fam.str = 'genpois')
+t01 <- bind_rows(t1,t2) %>% 
+  gather(name, stats, estimate, std.error, p.value) %>% 
+  unite(temp, fam.str, name) %>% 
+  spread(temp, stats) %>% 
+  dplyr::select(term, genpois_estimate, genpois_std.error, genpois_p.value, nbinom1_estimate, nbinom1_std.error, nbinom1_p.value) %>% 
+  mutate(Model='lesionvolume_V3 ~ treatment + log(vol0)')
+bind_rows(t00,t01) %>% 
+  as_grouped_data('Model') %>% 
+  as_flextable() %>% 
+  set_formatter(values = list(genpois_p.value = pvalformatter, nbinom1_p.value=pvalformatter)) %>% 
+  bold(i = ~genpois_p.value < 0.05 & term %in% c('treatmentrtPA', 'visitV3:treatmentrtPA'), j = ~genpois_p.value) %>% 
+  bold(i = ~nbinom1_p.value < 0.05 & term %in% c('treatmentrtPA', 'visitV3:treatmentrtPA') , j = ~nbinom1_p.value)  %>% 
+  bold(j = 1, i = ~ !is.na(Model), bold = TRUE, part = "body" ) %>% 
+  add_header_row(values = list('','Generalised Poisson','Negative binomial'), colwidths = c(1,3,3)) %>% 
+  set_header_labels(values = list(term = ''
+                                  , genpois_estimate = 'Estimate'
+                                  , genpois_p.value = 'p'
+                                  , genpois_std.error = 's. e.'
+                                  , nbinom1_estimate = 'Estimate'
+                                  , nbinom1_p.value = 'p'
+                                  , nbinom1_std.error = 's. e.')) %>% 
+  theme_booktabs() %>% 
+  align(i = 1, part = 'header', align = 'center')
+```

@@ -1,0 +1,86 @@
+---
+title: "Effect of rtPA on ChaCo score in WAKE-UP cohort"
+author: "Eckhard Schlemm"
+date: "2/26/2021"
+output: html_document
+---
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+asz <- 86
+# source('./scripts/prepdata.r')
+
+source('./scripts/loaddata.r')
+source('./scripts/environment.r')
+```
+
+```{r cache=TRUE}
+m.prop <- lme4::glmer(formula = I(nemoscore>0) ~ visit*treatment + visit*ROI + llv*ROI  + (1|ID)
+            , data = subset(dd, ROI %in% sort(unique(dd$ROI))[1:3])
+            , family = binomial()
+            , control=lme4::glmerControl(optimizer = "Nelder_Mead", optCtrl = list(maxfun = 1e7))
+            )
+tab.anova.fcn(m.prop)
+```
+
+```{r echo=FALSE, cache=FALSE, warning=FALSE}
+d.delta <- dd %>% 
+  group_by(ROI,ID) %>% 
+  mutate(delta.nemo = nemoscore - nemoscore[visit=='V0'])
+
+dd.delta <- d.delta %>% 
+  group_by(ROI) %>% nest() %>% 
+  mutate(wct = map(data, ~wilcox.test(.$delta.nemo[.$treatment=='Placebo' & .$visit=='V3']
+                                      , .$delta.nemo[.$treatment=='rtPA' & .$visit=='V3']
+                                      , paired = FALSE))
+         , p = map_dbl(wct, ~.$p.value)) %>% 
+  arrange(p)
+```
+
+```{r fig.width=18, fig.height=24, cache=FALSE}
+source('./scripts//plotscatterbar.r')
+p
+```
+
+```{r fig.width=18, fig.height=24}
+dd %>%
+  group_by(ROI, ID) %>% 
+  mutate(delta.nemo = nemoscore - nemoscore[visit == 'V0']
+         , delta.vol = log(lesionvolume) - log(lesionvolume[visit == 'V0'])) %>% 
+  ungroup() %>% group_by(ROI) %>% nest() %>% 
+  mutate(mdl = map(data, ~lm(scale(delta.nemo) ~ scale(delta.vol), data  = .))
+         , tidy = map(mdl, ~tidy(., conf.int = TRUE))) %>% 
+  unnest(tidy) %>% unnest(data) %>%
+  dplyr::filter(term == 'scale(delta.vol)') %>% 
+  ungroup() %>% 
+  mutate(ROI = forcats::fct_reorder(ROI, as.numeric(lobe) - estimate)) %>% 
+  arrange(ROI, p.value) %>% 
+  ungroup() %>% 
+  filter(visit == 'V3') %>% 
+  filter(is.finite(delta.nemo)) %>% 
+  ggplot(aes(x = delta.vol, y = delta.nemo, color = lobe)) +
+  geom_point(shape = 21, alpha = .5) +
+  geom_smooth(aes(fill = lobe), method = 'lm', se = TRUE, color = 'black', alpha = .5, size = .5) +
+  geom_text(data = . %>% dplyr::select(ROI, estimate, conf.low, conf.high, lobe) %>% distinct()
+            , aes(label = paste0('b = '
+                                 , scales::number(estimate, accuracy = .01)
+                                 , '['
+                                 , scales::number(conf.low, accuracy = .01)
+                                 , '--'
+                                 , scales::number(conf.high, accuracy = .01)
+                                 , ']'
+            )
+                  )
+            , x = 0, y = -0.6, size = 2, hjust = .5) +
+  facet_wrap(~ROI, ncol = 6) +
+  scale_x_continuous('Infarct growth') +
+  scale_y_continuous('Progressive loss of connectivity') +
+  guides(color = FALSE, fill = FALSE) +
+  theme_minimal() +
+  theme(text = element_text(size = 6, family = 'Helvetica')
+        , strip.text = element_text(size = 6))
+
+
+#ggsave(paste0('./../../derivatives/figures/supplement/deltanemo_deltavol_', asz, '.tiff'), device = 'tiff', width = 18, height = 24, units = 'cm', dpi = 2400)
+ggsave(paste0('./../../derivatives/figures/supplement/deltanemo_deltavol_', asz, '.svg'), device = 'svg', width = 18, height = 24, units = 'cm')
+ggsave(paste0('./../../derivatives/figures/supplement/deltanemo_deltavol_', asz, '.eps'), device = 'eps', width = 18, height = 24, units = 'cm')
+```
